@@ -9,7 +9,7 @@ from pycupra import Connection
 app = FastAPI()
 
 NOTION_TOKEN = os.environ["NOTION_TOKEN"]
-PAGE_ID = os.environ["PAGE_ID"]
+DATABASE_ID = os.environ["DATABASE_ID"]  # ZMIANA: DATABASE_ID zamiast PAGE_ID
 PROPERTY = os.environ["PROPERTY"]
 
 CUPRA_USER = os.environ["CUPRA_USER"]
@@ -36,9 +36,37 @@ async def get_mileage() -> int:
 
         return mileage
 
+def get_first_row_id() -> str:
+    """Pobiera ID pierwszego wiersza z bazy danych"""
+    r = requests.post(
+        f"https://api.notion.com/v1/databases/{DATABASE_ID}/query",
+        headers={
+            "Authorization": f"Bearer {NOTION_TOKEN}",
+            "Notion-Version": "2022-06-28",
+            "Content-Type": "application/json"
+        },
+        json={
+            "page_size": 1
+        }
+    )
+    
+    if not r.ok:
+        raise RuntimeError(f"Failed to query database: {r.text}")
+    
+    data = r.json()
+    results = data.get("results", [])
+    
+    if not results:
+        raise ValueError("Database is empty - no rows to update")
+    
+    return results[0]["id"]
+
 def update_notion(value: int):
+    # ZMIANA: Najpierw pobierz ID wiersza z bazy
+    page_id = get_first_row_id()
+    
     r = requests.patch(
-        f"https://api.notion.com/v1/pages/{PAGE_ID}",
+        f"https://api.notion.com/v1/pages/{page_id}",  # ZMIANA: Używamy page_id z wiersza
         headers={
             "Authorization": f"Bearer {NOTION_TOKEN}",
             "Notion-Version": "2022-06-28",
