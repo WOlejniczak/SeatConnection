@@ -13,12 +13,13 @@ DATABASE_ID = os.environ["DATABASE_ID"]
 PROPERTY = os.environ["PROPERTY"]
 CUPRA_USER = os.environ["CUPRA_USER"]
 CUPRA_PASS = os.environ["CUPRA_PASS"]
+NOTION_VERSION = os.environ["NOTION_VERSION"]
 VIN = os.environ["VIN"]
 BASE_URL = "https://ola.prod.code.seat.cloud.vwgroup.com"
 
 # Wersja API Notion. Można nadpisać zmienną środowiskową NOTION_VERSION
 # bez edytowania kodu. "2022-06-28" to stabilna, wspierana wersja API.
-NOTION_VERSION = os.environ.get("NOTION_VERSION", "2022-06-28")
+
 
 
 def notion_headers() -> dict[str, str]:
