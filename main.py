@@ -16,6 +16,18 @@ CUPRA_PASS = os.environ["CUPRA_PASS"]
 VIN = os.environ["VIN"]
 BASE_URL = "https://ola.prod.code.seat.cloud.vwgroup.com"
 
+# Wersja API Notion. Można nadpisać zmienną środowiskową NOTION_VERSION
+# bez edytowania kodu. "2022-06-28" to stabilna, wspierana wersja API.
+NOTION_VERSION = os.environ.get("NOTION_VERSION", "2022-06-28")
+
+
+def notion_headers() -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {NOTION_TOKEN}",
+        "Notion-Version": NOTION_VERSION,
+        "Content-Type": "application/json",
+    }
+
 async def get_mileage() -> int:
     async with aiohttp.ClientSession() as session:
         client = Connection(
@@ -45,11 +57,7 @@ def get_all_page_ids() -> list[str]:
             
         r = requests.post(
             f"https://api.notion.com/v1/databases/{DATABASE_ID}/query",
-            headers={
-                "Authorization": f"Bearer {NOTION_TOKEN}",
-                "Notion-Version": "2022-06-28",
-                "Content-Type": "application/json"
-            },
+            headers=notion_headers(),
             json=payload
         )
         
@@ -73,11 +81,7 @@ def update_notion(value: int):
     for page_id in page_ids:
         r = requests.patch(
             f"https://api.notion.com/v1/pages/{page_id}",
-            headers={
-                "Authorization": f"Bearer {NOTION_TOKEN}",
-                "Notion-Version": "2022-06-28",
-                "Content-Type": "application/json"
-            },
+            headers=notion_headers(),
             json={
                 "properties": {
                     PROPERTY: {"number": value}
