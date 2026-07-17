@@ -174,9 +174,6 @@ async def run():
 
 
 if __name__ == "__main__":
-    import asyncio
-    print("start")
-    mileage = asyncio.run(get_mileage())
-    print("mileage:", mileage)
-    update_notion(mileage)
-    print("Notion zaktualizowany")
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
