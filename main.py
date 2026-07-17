@@ -50,7 +50,7 @@ def parse_mileage(payload: dict) -> int:
 
 async def _full_login(page):
     """Pełny OIDC flow — wykonywany zawsze (świeża sesja przy każdym uruchomieniu)."""
-    await page.goto(PORTAL_URL, wait_until="networkidle")
+    await page.goto(PORTAL_URL, wait_until="domcontentloaded")
     await page.get_by_role("link", name="Log In").first.click()
 
     brand = page.locator("#form-login-brand-select")
@@ -71,7 +71,7 @@ async def _full_login(page):
     pwd = page.locator("#password")
     await pwd.wait_for(state="visible", timeout=20000)
     await pwd.fill(CUPRA_PASS)
-    async with page.expect_navigation(wait_until="networkidle", timeout=45000):
+    async with page.expect_navigation(wait_until="domcontentloaded", timeout=45000):
         await pwd.press("Enter")
 
     # Consent — obsłużony defensywnie, na wypadek gdyby wyskoczył
@@ -80,7 +80,7 @@ async def _full_login(page):
             has_text=re.compile(r"allow|zaakceptuj|weiter|accept", re.I)
         )
         if await consent.count() and await consent.first.is_visible():
-            async with page.expect_navigation(wait_until="networkidle", timeout=30000):
+            async with page.expect_navigation(wait_until="domcontentloaded", timeout=30000):
                 await consent.first.click()
     except Exception:
         pass
@@ -97,7 +97,7 @@ async def get_mileage() -> int:
             await _full_login(page)
 
             # Po zalogowaniu przejdź na stronę szczegółów pojazdu
-            await page.goto(DETAILS_URL, wait_until="networkidle")
+            await page.goto(DETAILS_URL, wait_until="domcontentloaded")
 
             download_btn = page.get_by_test_id("request-file-partial-file-download-button")
             await download_btn.wait_for(state="visible", timeout=20000)
