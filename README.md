@@ -33,8 +33,11 @@ Notion (embed) ──► docs/index.html (GitHub Pages) ──► workflow_dispa
 5. **Token do przycisku**: Settings (konta) → Developer settings → Personal access tokens →
    Fine-grained tokens → Generate new token. Repository access: *Only select repositories* →
    `SeatConnection`; Permissions → Repository → **Actions: Read and write**.
-6. **Notion**: wpisz `/embed`, wklej adres strony z Pages, kliknij ⚙ i wklej token.
-   Token zapisuje się w przeglądarce, więc na każdym urządzeniu trzeba go podać raz.
+6. **Notion**: wpisz `/embed` i wklej adres strony z tokenem po `#`:
+   `https://wolejniczak.github.io/SeatConnection/#token=github_pat_...`
+   Część po `#` nie jest wysyłana do żadnego serwera. Token widzi każdy, kto ma dostęp do tej strony
+   w Notion, więc nie udostępniaj jej publicznie.
+   Alternatywa: embed bez tokenu, potem ⚙ i wklejenie tokenu (zapis w localStorage przeglądarki).
 
 ## Uruchomienie lokalne
 

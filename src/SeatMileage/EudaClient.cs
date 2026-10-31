@@ -90,47 +90,69 @@ public sealed class EudaClient : IAsyncDisposable
 
         await page.GotoAsync(AuthorizeUrl());
 
-        var emailInput = page.Locator("input[name='email']:visible");
-        await emailInput.FillAsync(email);
-        await emailInput.PressAsync("Enter");
-        Console.WriteLine("EUDA login: identifier step submitted");
+        // VW Identity runs on Auth0 Universal Login (/u/login): email and password
+        // usually sit on one form, but the identifier-first variant (password on a
+        // second screen) is handled too.
+        var emailInput = page.GetByLabel("Adres e-mail")
+            .Or(page.Locator("input[name='username'], input[name='email']")).First;
+        var passwordInput = page.GetByLabel("Hasło")
+            .Or(page.Locator("input[name='password']")).First;
+        var continueButton = page.GetByRole(AriaRole.Button, new() { Name = "Kontynuuj" })
+            .Or(page.Locator("button[type='submit'][name='action']")).First;
 
-        var passwordInput = page.Locator("input[name='password']:visible");
-        try
+        await emailInput.FillAsync(email);
+        if (!await passwordInput.IsVisibleAsync())
         {
-            await passwordInput.WaitForAsync();
-        }
-        catch (TimeoutException)
-        {
-            throw new AuthException(DiagnoseLoginFailure(page.Url, await page.ContentAsync())
-                                    + " (password form not shown - check email)");
+            await continueButton.ClickAsync();
+            Console.WriteLine("EUDA login: identifier step submitted");
+            try
+            {
+                await passwordInput.WaitForAsync(new() { State = WaitForSelectorState.Visible });
+            }
+            catch (TimeoutException)
+            {
+                throw new AuthException(await DiagnosePageAsync(page) + " (password form not shown - check email)");
+            }
         }
         await passwordInput.FillAsync(password);
-        await passwordInput.PressAsync("Enter");
-        Console.WriteLine("EUDA login: password step submitted");
+        await continueButton.ClickAsync();
+        Console.WriteLine("EUDA login: credentials submitted");
 
-        try
+        // Wait until we land on the portal, or the login page shows an error / consent screen.
+        var deadline = DateTime.UtcNow + LoginTimeout;
+        while (true)
         {
-            await page.WaitForURLAsync(url =>
+            var uri = new Uri(page.Url);
+            if (uri.Host == PortalHost && !uri.AbsolutePath.StartsWith("/login", StringComparison.Ordinal))
+                break;
+            if (page.Url.Contains("/consent") || uri.Query.Contains("error=")
+                || await page.Locator(LoginErrorSelector).First.IsVisibleAsync())
+                throw new AuthException(await DiagnosePageAsync(page));
+            if (DateTime.UtcNow > deadline)
             {
-                var uri = new Uri(url);
-                return (uri.Host == PortalHost && !uri.AbsolutePath.StartsWith("/login", StringComparison.Ordinal))
-                       || url.Contains("/signin-service/v1/consent/")
-                       || uri.Query.Contains("error=");
-            });
-            await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+                // The portal may stay on /login after the code exchange - accept it.
+                if (uri.Host == PortalHost)
+                    break;
+                throw new AuthException(await DiagnosePageAsync(page));
+            }
+            await Task.Delay(500);
         }
-        catch (TimeoutException)
-        {
-            // fall through to diagnosis below
-        }
-
-        var landing = page.Url;
-        if (new Uri(landing).Host != PortalHost || landing.Contains("error="))
-            throw new AuthException(DiagnoseLoginFailure(landing, await page.ContentAsync()));
+        await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
         await page.CloseAsync();
         Console.WriteLine("EUDA login: OK");
+    }
+
+    // Auth0 Universal Login error elements (field-level and banner).
+    private const string LoginErrorSelector =
+        "[id^='error-element']:visible, .ulp-input-error-message:visible, #prompt-alert:visible, [data-error-code]:visible";
+
+    private static async Task<string> DiagnosePageAsync(IPage page)
+    {
+        var errors = await page.Locator(LoginErrorSelector).AllInnerTextsAsync();
+        var shown = string.Join(" ", errors.Select(e => e.Trim()).Where(e => e.Length > 0));
+        var diagnosis = DiagnoseLoginFailure(page.Url, await page.ContentAsync());
+        return shown.Length > 0 ? $"{diagnosis} (page says: {shown})" : diagnosis;
     }
 
     /// <summary>
@@ -139,7 +161,7 @@ public sealed class EudaClient : IAsyncDisposable
     /// </summary>
     private static string DiagnoseLoginFailure(string landingUrl, string landingHtml)
     {
-        if (landingUrl.Contains("/signin-service/v1/consent/") || landingHtml.Contains("consent-screen"))
+        if (landingUrl.Contains("/consent") || landingHtml.Contains("consent-screen"))
             return "EU Data Act consent screen is blocking the login - open " +
                    $"{BaseUrl}/ in a browser, log in with the same credentials, " +
                    "click Allow, then finish portal setup (vehicle linking + " +

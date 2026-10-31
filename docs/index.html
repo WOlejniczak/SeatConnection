@@ -96,9 +96,12 @@
   const runBtn = document.getElementById('run');
   const settingsBtn = document.getElementById('settings');
   const statusEl = document.getElementById('status');
+  // Token can also come from the embed URL fragment (#token=...), which is never sent to any server.
+  const hashToken = new URLSearchParams(location.hash.slice(1)).get('token');
   let sessionToken = null;
 
   function loadToken() {
+    if (hashToken) return hashToken;
     try { return localStorage.getItem(TOKEN_KEY) || sessionToken; } catch { return sessionToken; }
   }
   function saveToken(token) {
@@ -172,7 +175,9 @@
         body: JSON.stringify({ ref: BRANCH }),
       });
       if (r.status === 401 || r.status === 403 || r.status === 404) {
-        setStatus('✗ Token nieprawidłowy lub bez uprawnień. Kliknij ⚙ i wklej nowy.', 'err');
+        setStatus(hashToken
+          ? '✗ Token z adresu embedu jest nieprawidłowy lub wygasł. Podmień go w adresie embedu w Notion.'
+          : '✗ Token nieprawidłowy lub bez uprawnień. Kliknij ⚙ i wklej nowy.', 'err');
         return;
       }
       if (r.status !== 204) throw new Error(`GitHub API: HTTP ${r.status}`);
