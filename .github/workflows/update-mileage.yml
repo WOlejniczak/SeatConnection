@@ -47,3 +47,16 @@ jobs:
           DATABASE_ID: ${{ secrets.DATABASE_ID }}
           PROPERTY: ${{ secrets.PROPERTY }}
           NOTION_VERSION: ${{ secrets.NOTION_VERSION }}
+
+  # GitHub disables scheduled workflows in public repos after 60 days without
+  # commits. Re-enabling the workflow via the API resets that counter.
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      actions: write
+    steps:
+      - name: Keep schedule enabled
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/update-mileage.yml/enable"
+        env:
+          GH_TOKEN: ${{ github.token }}
