@@ -382,25 +382,31 @@ def get_all_page_ids() -> list[str]:
     has_more = True
     start_cursor = None
 
+
     while has_more:
         payload = {"page_size": 100}
         if start_cursor:
             payload["start_cursor"] = start_cursor
 
+
         r = requests.post(
             f"https://api.notion.com/v1/databases/{DATABASE_ID}/query",
             headers=notion_headers(),
             json=payload,
+            json=payload,
         )
         if not r.ok:
             raise RuntimeError(f"Failed to query database: {r.text}")
+
 
         data = r.json()
         page_ids.extend([page["id"] for page in data.get("results", [])])
         has_more = data.get("has_more", False)
         start_cursor = data.get("next_cursor")
 
+
     return page_ids
+
 
 
 def update_notion(value: int):
@@ -415,9 +421,11 @@ def update_notion(value: int):
             f"https://api.notion.com/v1/pages/{page_id}",
             headers=notion_headers(),
             json={"properties": {PROPERTY: {"number": value}}},
+            json={"properties": {PROPERTY: {"number": value}}},
         )
         if not r.ok:
             failed_updates.append({"page_id": page_id, "error": r.text})
+
 
     if failed_updates:
         raise RuntimeError(f"Failed to update {len(failed_updates)} rows: {json.dumps(failed_updates)}")
