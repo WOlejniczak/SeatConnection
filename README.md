@@ -37,7 +37,6 @@ Notion (embed) ──► docs/index.html (GitHub Pages) ──► workflow_dispa
    `https://wolejniczak.github.io/SeatConnection/#token=github_pat_...`
    Część po `#` nie jest wysyłana do żadnego serwera. Token widzi każdy, kto ma dostęp do tej strony
    w Notion, więc nie udostępniaj jej publicznie.
-   Alternatywa: embed bez tokenu, potem ⚙ i wklejenie tokenu (zapis w localStorage przeglądarki).
 
 ## Uruchomienie lokalne
 
