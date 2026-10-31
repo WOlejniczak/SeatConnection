@@ -1,0 +1,49 @@
+name: Update mileage
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 4 * * *" # 6:00 czasu letniego / 5:00 zimowego w PL
+
+concurrency:
+  group: update-mileage
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: src/SeatMileage
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('src/SeatMileage/SeatMileage.csproj') }}
+
+      - name: Build
+        run: dotnet build -c Release
+
+      - name: Install Chromium
+        run: pwsh bin/Release/net8.0/playwright.ps1 install --with-deps chromium
+
+      - name: Update mileage in Notion
+        run: dotnet run -c Release --no-build
+        env:
+          CUPRA_USER: ${{ secrets.CUPRA_USER }}
+          CUPRA_PASS: ${{ secrets.CUPRA_PASS }}
+          VIN: ${{ secrets.VIN }}
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          DATABASE_ID: ${{ secrets.DATABASE_ID }}
+          PROPERTY: ${{ secrets.PROPERTY }}
+          NOTION_VERSION: ${{ secrets.NOTION_VERSION }}

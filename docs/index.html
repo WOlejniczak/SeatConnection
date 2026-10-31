@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aktualizuj przebieg</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #37352f;
+    --muted: #787774;
+    --btn: #2383e2;
+    --btn-hover: #0077d4;
+    --btn-fg: #ffffff;
+    --border: rgba(55, 53, 47, 0.16);
+    --ok: #448361;
+    --err: #d44c47;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #191919;
+      --fg: #e3e2e0;
+      --muted: #9b9a97;
+      --border: rgba(255, 255, 255, 0.13);
+      --ok: #4dab9a;
+      --err: #e06a64;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #191919;
+    --fg: #e3e2e0;
+    --muted: #9b9a97;
+    --border: rgba(255, 255, 255, 0.13);
+    --ok: #4dab9a;
+    --err: #e06a64;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font: 14px/1.5 ui-sans-serif, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+  }
+  .wrap { display: flex; flex-direction: column; align-items: center; gap: 10px; width: 100%; max-width: 360px; }
+  .row { display: flex; gap: 8px; width: 100%; }
+  #run {
+    flex: 1;
+    padding: 12px 18px;
+    border: 0;
+    border-radius: 8px;
+    background: var(--btn);
+    color: var(--btn-fg);
+    font: inherit;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .15s;
+  }
+  #run:hover:not(:disabled) { background: var(--btn-hover); }
+  #run:disabled { opacity: .6; cursor: progress; }
+  #settings {
+    width: 46px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--muted);
+    font-size: 18px;
+    cursor: pointer;
+  }
+  #status { min-height: 1.5em; color: var(--muted); text-align: center; }
+  #status.ok { color: var(--ok); }
+  #status.err { color: var(--err); }
+  #status a { color: inherit; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="row">
+    <button id="run" type="button">Aktualizuj przebieg</button>
+    <button id="settings" type="button" title="Token GitHub" aria-label="Ustawienia tokenu">⚙</button>
+  </div>
+  <div id="status" role="status"></div>
+</div>
+<script>
+  const OWNER = 'WOlejniczak';
+  const REPO = 'SeatConnection';
+  const WORKFLOW = 'update-mileage.yml';
+  const BRANCH = 'main';
+  const TOKEN_KEY = 'seat-mileage-gh-token';
+  const API = `https://api.github.com/repos/${OWNER}/${REPO}/actions/workflows/${WORKFLOW}`;
+
+  const runBtn = document.getElementById('run');
+  const settingsBtn = document.getElementById('settings');
+  const statusEl = document.getElementById('status');
+  let sessionToken = null;
+
+  function loadToken() {
+    try { return localStorage.getItem(TOKEN_KEY) || sessionToken; } catch { return sessionToken; }
+  }
+  function saveToken(token) {
+    sessionToken = token;
+    try { token ? localStorage.setItem(TOKEN_KEY, token) : localStorage.removeItem(TOKEN_KEY); } catch {}
+  }
+  function askToken() {
+    const t = prompt('Wklej fine-grained token GitHub (uprawnienie Actions: Read and write).\nPuste pole = usuń zapisany token.', '');
+    if (t === null) return null;
+    saveToken(t.trim() || null);
+    return t.trim() || null;
+  }
+  function setStatus(html, cls = '') {
+    statusEl.className = cls;
+    statusEl.innerHTML = html;
+  }
+  function gh(url, opts = {}) {
+    return fetch(url, {
+      ...opts,
+      headers: {
+        'Accept': 'application/vnd.github+json',
+        'Authorization': `Bearer ${loadToken()}`,
+        'X-GitHub-Api-Version': '2022-11-28',
+        ...(opts.headers || {}),
+      },
+    });
+  }
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+  async function findRun(since) {
+    for (let i = 0; i < 24; i++) {
+      await sleep(5000);
+      const r = await gh(`${API}/runs?event=workflow_dispatch&branch=${BRANCH}&per_page=5`);
+      if (!r.ok) continue;
+      const { workflow_runs } = await r.json();
+      const run = workflow_runs.find(w => new Date(w.created_at).getTime() >= since - 10000);
+      if (run) return run;
+    }
+    throw new Error('Nie znaleziono uruchomionego workflow.');
+  }
+
+  async function waitForRun(run) {
+    const link = `<a href="${run.html_url}" target="_blank" rel="noopener">logi</a>`;
+    while (true) {
+      if (run.status === 'completed') {
+        if (run.conclusion === 'success') {
+          setStatus(`✓ Zaktualizowano · ${new Date().toLocaleTimeString('pl-PL')} · ${link}`, 'ok');
+        } else {
+          setStatus(`✗ Błąd (${run.conclusion}) · ${link}`, 'err');
+        }
+        return;
+      }
+      setStatus(run.status === 'in_progress'
+        ? `Loguję się i pobieram przebieg… · ${link}`
+        : `W kolejce… · ${link}`);
+      await sleep(5000);
+      const r = await gh(`https://api.github.com/repos/${OWNER}/${REPO}/actions/runs/${run.id}`);
+      if (r.ok) run = await r.json();
+    }
+  }
+
+  async function trigger() {
+    if (!loadToken() && !askToken()) return;
+    runBtn.disabled = true;
+    setStatus('Uruchamiam…');
+    try {
+      const since = Date.now();
+      const r = await gh(`${API}/dispatches`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ref: BRANCH }),
+      });
+      if (r.status === 401 || r.status === 403 || r.status === 404) {
+        setStatus('✗ Token nieprawidłowy lub bez uprawnień. Kliknij ⚙ i wklej nowy.', 'err');
+        return;
+      }
+      if (r.status !== 204) throw new Error(`GitHub API: HTTP ${r.status}`);
+      setStatus('W kolejce…');
+      await waitForRun(await findRun(since));
+    } catch (e) {
+      setStatus(`✗ ${e.message}`, 'err');
+    } finally {
+      runBtn.disabled = false;
+    }
+  }
+
+  runBtn.addEventListener('click', trigger);
+  settingsBtn.addEventListener('click', () => {
+    if (askToken()) setStatus('Token zapisany.', 'ok');
+    else if (!loadToken()) setStatus('Brak tokenu.');
+  });
+</script>
+</body>
+</html>
