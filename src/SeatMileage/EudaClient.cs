@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Web;
 using Microsoft.Playwright;
 
 namespace SeatMileage;
@@ -27,6 +28,7 @@ public sealed class EudaClient : IAsyncDisposable
 
     private const string MetadataPath = "/proxy_api/euda-apim/datarequest/vehicles/{0}/metadata/partial";
     private const string PermissionCheckPath = "/services/permissioncheck";
+    private const string AuthenticationPath = "/services/redirect/authentication";
     private const string ListPath = "/proxy_api/euda-apim/datadelivery/vehicles/{0}/{1}/list";
     private const string DownloadPath = "/proxy_api/euda-apim/datadelivery/vehicles/{0}/{1}/download";
     public const string NoContentSuffix = "_no_content_found.zip";
@@ -83,16 +85,14 @@ public sealed class EudaClient : IAsyncDisposable
         var page = await _context.NewPageAsync();
         page.SetDefaultTimeout((float)LoginTimeout.TotalMilliseconds);
 
-        try
+        // Log every main-frame navigation so a failed login shows where it went wrong.
+        page.Response += (_, r) =>
         {
-            await page.GotoAsync(BaseUrl + "/");
-        }
-        catch (PlaywrightException)
-        {
-            // priming request, failure is non-fatal
-        }
+            if (r.Request.IsNavigationRequest && r.Frame == page.MainFrame)
+                Console.WriteLine($"EUDA login:   {r.Status} {RedactUrl(r.Url)}");
+        };
 
-        await page.GotoAsync(AuthorizeUrl());
+        await page.GotoAsync(await StartAuthenticationAsync(page));
 
         // VW Identity runs on Auth0 Universal Login (/u/login): email and password
         // usually sit on one form, but the identifier-first variant (password on a
@@ -126,16 +126,22 @@ public sealed class EudaClient : IAsyncDisposable
         // an error / consent screen. The portal handles the code at /login ->
         // /services/callbacklogin; a failed exchange bounces to /{country}/{lang}/login.html.
         var deadline = DateTime.UtcNow + LoginTimeout;
+        DateTime? bouncedAt = null;
         while (true)
         {
             var uri = new Uri(page.Url);
             if (uri.Host == PortalHost && !IsCallbackPath(uri.AbsolutePath))
             {
-                if (await IsAuthenticatedAsync())
+                if (await IsAuthenticatedAsync(page))
                     break;
                 if (uri.AbsolutePath.Contains("login", StringComparison.OrdinalIgnoreCase))
-                    throw new AuthException(await DiagnosePageAsync(page) +
-                                            " (portal rejected the session after the identity login)");
+                {
+                    bouncedAt ??= DateTime.UtcNow;
+                    if (DateTime.UtcNow - bouncedAt > TimeSpan.FromSeconds(10))
+                        throw new AuthException(await DiagnosePageAsync(page) +
+                                                " (portal has no session after the identity login; cookies: " +
+                                                await PortalCookieNamesAsync() + ")");
+                }
             }
             if (page.Url.Contains("/consent") || uri.Query.Contains("error=")
                 || await page.Locator(LoginErrorSelector).First.IsVisibleAsync())
@@ -154,18 +160,61 @@ public sealed class EudaClient : IAsyncDisposable
         path.StartsWith("/login", StringComparison.Ordinal)
         || path.StartsWith("/services/callbacklogin", StringComparison.Ordinal);
 
+    /// <summary>
+    /// Enter the login the way the portal's brand-selection button does: the
+    /// authentication service sets the login_redirect cookie used by the callback,
+    /// then sends us to a "you are leaving the portal" screen whose ?redirect= is
+    /// the VW Identity authorize URL. Falls back to a hand-built authorize URL.
+    /// </summary>
+    private async Task<string> StartAuthenticationAsync(IPage page)
+    {
+        var loginPage = $"{BaseUrl}/{Country}/{Language}/login.html";
+        try
+        {
+            await page.GotoAsync(loginPage);
+            await page.GotoAsync($"{BaseUrl}{AuthenticationPath}?brand={SeatState}&method=login",
+                new() { Referer = loginPage });
+            var target = HttpUtility.ParseQueryString(new Uri(page.Url).Query)["redirect"];
+            if (target != null && target.StartsWith(OidcAuthorizeUrl, StringComparison.Ordinal))
+                return target;
+            Console.WriteLine($"EUDA login: unexpected authentication page {RedactUrl(page.Url)}, using built-in authorize URL");
+        }
+        catch (PlaywrightException e)
+        {
+            Console.WriteLine($"EUDA login: authentication service failed ({e.Message.Split('\n')[0]}), using built-in authorize URL");
+        }
+        return AuthorizeUrl();
+    }
+
     /// <summary>The portal's own logged-in check (HEAD returns 200 with a valid session).</summary>
-    private async Task<bool> IsAuthenticatedAsync()
+    private async Task<bool> IsAuthenticatedAsync(IPage page)
     {
         try
         {
-            var resp = await _context.APIRequest.FetchAsync(BaseUrl + PermissionCheckPath, new() { Method = "HEAD" });
-            return resp.Ok;
+            return await page.EvaluateAsync<bool>(
+                $"async () => (await fetch('{PermissionCheckPath}', {{ method: 'HEAD' }})).ok");
         }
         catch (PlaywrightException)
         {
-            return false;
+            return false; // page navigated mid-check
         }
+    }
+
+    private async Task<string> PortalCookieNamesAsync()
+    {
+        var names = (await _context.CookiesAsync([BaseUrl])).Select(c => c.Name).ToList();
+        return names.Count > 0 ? string.Join(", ", names) : "none";
+    }
+
+    /// <summary>URL without query values (auth codes, state), except error details.</summary>
+    private static string RedactUrl(string url)
+    {
+        var uri = new Uri(url);
+        var query = HttpUtility.ParseQueryString(uri.Query);
+        var parts = query.AllKeys.Where(k => k != null).Select(k =>
+            k!.StartsWith("error", StringComparison.Ordinal) ? $"{k}={query[k]}" : k);
+        var q = string.Join("&", parts);
+        return uri.GetLeftPart(UriPartial.Path) + (q.Length > 0 ? "?" + q : "");
     }
 
     // Auth0 Universal Login error elements (field-level and banner).
