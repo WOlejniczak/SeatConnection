@@ -1,7 +1,7 @@
 # SeatConnection
 
 Przycisk „Aktualizuj przebieg” w Notion → GitHub Actions loguje się Playwrightem do portalu
-[EU Data Act](https://eu-data-act.drivesomethinggreater.com/), pobiera najnowszy pakiet danych auta,
+[EU Data Act](https://eu-data-act.vwgroup-datahub.com/), pobiera najnowszy pakiet danych auta,
 odczytuje przebieg i wpisuje go do bazy Notion. Dodatkowo uruchamia się automatycznie raz dziennie.
 
 ```
@@ -22,7 +22,7 @@ Notion (embed) ──► docs/index.html (GitHub Pages) ──► workflow_dispa
 
 ## Konfiguracja
 
-1. **Portal EU Data Act**: zaloguj się na https://eu-data-act.drivesomethinggreater.com/, kliknij „Allow”,
+1. **Portal EU Data Act**: zaloguj się na https://eu-data-act.vwgroup-datahub.com/, kliknij „Allow”,
    podepnij auto i włącz ciągłe żądanie danych (co 15 min).
 2. **Repo publiczne**: Settings → General → Danger Zone → Change visibility → Public.
 3. **Sekrety**: Settings → Secrets and variables → Actions → New repository secret:

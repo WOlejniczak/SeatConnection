@@ -13,7 +13,10 @@ public sealed class AuthException(string message) : Exception(message);
 public sealed class EudaClient : IAsyncDisposable
 {
     // --- EU Data Act portal constants (undocumented, reverse-engineered) ------
-    public const string BaseUrl = "https://eu-data-act.drivesomethinggreater.com";
+    // Moved from eu-data-act.drivesomethinggreater.com (which now 301-redirects here).
+    // The portal backend exchanges the auth code using its own redirect_uri, so ours
+    // must match the current domain exactly or the login silently bounces back.
+    public const string BaseUrl = "https://eu-data-act.vwgroup-datahub.com";
     private const string OidcAuthorizeUrl = "https://identity.vwgroup.io/oidc/v1/authorize";
     private const string OidcScope = "openid cars profile";
     private const string OidcRedirectUri = BaseUrl + "/login";
@@ -23,6 +26,7 @@ public sealed class EudaClient : IAsyncDisposable
     private const string Language = "pl";
 
     private const string MetadataPath = "/proxy_api/euda-apim/datarequest/vehicles/{0}/metadata/partial";
+    private const string PermissionCheckPath = "/services/permissioncheck";
     private const string ListPath = "/proxy_api/euda-apim/datadelivery/vehicles/{0}/{1}/list";
     private const string DownloadPath = "/proxy_api/euda-apim/datadelivery/vehicles/{0}/{1}/download";
     public const string NoContentSuffix = "_no_content_found.zip";
@@ -118,29 +122,50 @@ public sealed class EudaClient : IAsyncDisposable
         await continueButton.ClickAsync();
         Console.WriteLine("EUDA login: credentials submitted");
 
-        // Wait until we land on the portal, or the login page shows an error / consent screen.
+        // Wait until we are back on the portal with a session, or the login page shows
+        // an error / consent screen. The portal handles the code at /login ->
+        // /services/callbacklogin; a failed exchange bounces to /{country}/{lang}/login.html.
         var deadline = DateTime.UtcNow + LoginTimeout;
         while (true)
         {
             var uri = new Uri(page.Url);
-            if (uri.Host == PortalHost && !uri.AbsolutePath.StartsWith("/login", StringComparison.Ordinal))
-                break;
+            if (uri.Host == PortalHost && !IsCallbackPath(uri.AbsolutePath))
+            {
+                if (await IsAuthenticatedAsync())
+                    break;
+                if (uri.AbsolutePath.Contains("login", StringComparison.OrdinalIgnoreCase))
+                    throw new AuthException(await DiagnosePageAsync(page) +
+                                            " (portal rejected the session after the identity login)");
+            }
             if (page.Url.Contains("/consent") || uri.Query.Contains("error=")
                 || await page.Locator(LoginErrorSelector).First.IsVisibleAsync())
                 throw new AuthException(await DiagnosePageAsync(page));
             if (DateTime.UtcNow > deadline)
-            {
-                // The portal may stay on /login after the code exchange - accept it.
-                if (uri.Host == PortalHost)
-                    break;
                 throw new AuthException(await DiagnosePageAsync(page));
-            }
             await Task.Delay(500);
         }
         await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
         await page.CloseAsync();
         Console.WriteLine("EUDA login: OK");
+    }
+
+    private static bool IsCallbackPath(string path) =>
+        path.StartsWith("/login", StringComparison.Ordinal)
+        || path.StartsWith("/services/callbacklogin", StringComparison.Ordinal);
+
+    /// <summary>The portal's own logged-in check (HEAD returns 200 with a valid session).</summary>
+    private async Task<bool> IsAuthenticatedAsync()
+    {
+        try
+        {
+            var resp = await _context.APIRequest.FetchAsync(BaseUrl + PermissionCheckPath, new() { Method = "HEAD" });
+            return resp.Ok;
+        }
+        catch (PlaywrightException)
+        {
+            return false;
+        }
     }
 
     // Auth0 Universal Login error elements (field-level and banner).
